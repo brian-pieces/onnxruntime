@@ -13,116 +13,15 @@ from typing import Any, Dict
 import torch
 
 import onnxruntime as ort
-from onnxruntime.transformers.io_binding_helper import TypeHelper
+from onnxruntime.transformers.io_binding_helper import TypeHelper, CudaSession
 
 logger = logging.getLogger(__name__)
 
-
-class OrtCudaSession:
-    """Inference Session with IO Binding for ONNX Runtime CUDA or TensorRT provider"""
-
-    def __init__(self, ort_session: ort.InferenceSession, device: torch.device, enable_cuda_graph=False):
-        self.ort_session = ort_session
-        self.input_names = [input.name for input in self.ort_session.get_inputs()]
-        self.output_names = [output.name for output in self.ort_session.get_outputs()]
-        self.io_name_to_numpy_type = TypeHelper.get_io_numpy_type_map(self.ort_session)
-        self.io_binding = self.ort_session.io_binding()
-        self.enable_cuda_graph = enable_cuda_graph
-
-        self.input_tensors = OrderedDict()
-        self.output_tensors = OrderedDict()
-        self.device = device
-
-    def __del__(self):
-        del self.input_tensors
-        del self.output_tensors
-        del self.io_binding
-        del self.ort_session
-
-    def allocate_buffers(self, shape_dict: Dict[str, tuple]):
-        """Allocate tensors for I/O Binding"""
-        if self.enable_cuda_graph:
-            for name, shape in shape_dict.items():
-                if name in self.input_names:
-                    # Reuse allocated buffer when the shape is same
-                    if name in self.input_tensors:
-                        if tuple(self.input_tensors[name].shape) == tuple(shape):
-                            continue
-                        raise RuntimeError("Expect static input shape for cuda graph")
-
-                    numpy_dtype = self.io_name_to_numpy_type[name]
-                    tensor = torch.empty(tuple(shape), dtype=TypeHelper.numpy_type_to_torch_type(numpy_dtype)).to(
-                        device=self.device
-                    )
-                    self.input_tensors[name] = tensor
-
-                    self.io_binding.bind_input(
-                        name,
-                        tensor.device.type,
-                        tensor.device.index,
-                        numpy_dtype,
-                        list(tensor.size()),
-                        tensor.data_ptr(),
-                    )
-
-        for name, shape in shape_dict.items():
-            if name in self.output_names:
-                # Reuse allocated buffer when the shape is same
-                if name in self.output_tensors and tuple(self.output_tensors[name].shape) == tuple(shape):
-                    continue
-
-                numpy_dtype = self.io_name_to_numpy_type[name]
-                tensor = torch.empty(tuple(shape), dtype=TypeHelper.numpy_type_to_torch_type(numpy_dtype)).to(
-                    device=self.device
-                )
-                self.output_tensors[name] = tensor
-
-                self.io_binding.bind_output(
-                    name,
-                    tensor.device.type,
-                    tensor.device.index,
-                    numpy_dtype,
-                    list(tensor.size()),
-                    tensor.data_ptr(),
-                )
-
-    def infer(self, feed_dict):
-        """Bind input tensors and run inference"""
-        for name, tensor in feed_dict.items():
-            assert isinstance(tensor, torch.Tensor) and tensor.is_contiguous()
-            if name in self.input_names:
-                if self.enable_cuda_graph:
-                    assert self.input_tensors[name].nelement() == tensor.nelement()
-                    assert tensor.device.type == "cuda"
-                    # Update input tensor inplace since cuda graph requires input and output has fixed memory address.
-                    from cuda import cudart
-
-                    cudart.cudaMemcpy(
-                        self.input_tensors[name].data_ptr(),
-                        tensor.data_ptr(),
-                        tensor.element_size() * tensor.nelement(),
-                        cudart.cudaMemcpyKind.cudaMemcpyDeviceToDevice,
-                    )
-                else:
-                    self.io_binding.bind_input(
-                        name,
-                        tensor.device.type,
-                        tensor.device.index,
-                        TypeHelper.torch_type_to_numpy_type(tensor.dtype),
-                        [1] if len(tensor.shape) == 0 else list(tensor.shape),
-                        tensor.data_ptr(),
-                    )
-
-        self.ort_session.run_with_iobinding(self.io_binding)
-
-        return self.output_tensors
-
-
-class Engine(OrtCudaSession):
+class Engine(CudaSession):
     def __init__(self, engine_path, provider: str, device_id: int = 0, enable_cuda_graph=False):
         self.engine_path = engine_path
         self.provider = provider
-        self.provider_options = self.get_cuda_provider_options(device_id, enable_cuda_graph)
+        self.provider_options = CudaSession.get_cuda_provider_options(device_id, enable_cuda_graph)
 
         device = torch.device("cuda", device_id)
         ort_session = ort.InferenceSession(
@@ -134,14 +33,6 @@ class Engine(OrtCudaSession):
         )
 
         super().__init__(ort_session, device, enable_cuda_graph)
-
-    def get_cuda_provider_options(self, device_id: int, enable_cuda_graph: bool) -> Dict[str, Any]:
-        return {
-            "device_id": device_id,
-            "arena_extend_strategy": "kSameAsRequested",
-            "enable_cuda_graph": enable_cuda_graph,
-        }
-
 
 class Engines:
     def __init__(self, provider, onnx_opset: int = 14):
