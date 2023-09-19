@@ -13,9 +13,10 @@ from typing import Any, Dict
 import torch
 
 import onnxruntime as ort
-from onnxruntime.transformers.io_binding_helper import TypeHelper, CudaSession
+from onnxruntime.transformers.io_binding_helper import CudaSession, TypeHelper
 
 logger = logging.getLogger(__name__)
+
 
 class Engine(CudaSession):
     def __init__(self, engine_path, provider: str, device_id: int = 0, enable_cuda_graph=False):
@@ -33,6 +34,7 @@ class Engine(CudaSession):
         )
 
         super().__init__(ort_session, device, enable_cuda_graph)
+
 
 class Engines:
     def __init__(self, provider, onnx_opset: int = 14):

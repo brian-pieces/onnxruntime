@@ -49,15 +49,15 @@ from diffusers.schedulers import DDIMScheduler
 from diffusers.utils import DIFFUSERS_CACHE, logging
 from huggingface_hub import snapshot_download
 from models import CLIP, VAE, UNet
-from ort_utils import OrtCudaSession
 from transformers import CLIPFeatureExtractor, CLIPTextModel, CLIPTokenizer
 
 import onnxruntime as ort
+from onnxruntime.transformers.io_binding_helper import CudaSession
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 
-class Engine(OrtCudaSession):
+class Engine(CudaSession):
     def __init__(self, engine_path, device_id, onnx_path, fp16, input_profile, workspace_size, enable_cuda_graph):
         self.engine_path = engine_path
         self.ort_trt_provider_options = self.get_tensorrt_provider_options(
