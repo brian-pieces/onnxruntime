@@ -23,6 +23,8 @@
 Models used in Stable diffusion.
 """
 import logging
+import os
+import tempfile
 
 import onnx
 import onnx_graphsurgeon as gs
@@ -56,8 +58,17 @@ class TrtOptimizer:
 
     def infer_shapes(self):
         onnx_graph = gs.export_onnx(self.graph)
-        if onnx_graph.ByteSize() > 2147483648:
-            raise TypeError("ERROR: model size exceeds supported 2GB limit")
+        if onnx_graph.ByteSize() >= onnx.checker.MAXIMUM_PROTOBUF:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                input_onnx_path = os.path.join(temp_dir, 'model.onnx')
+                onnx.save_model(onnx_graph,
+                    input_onnx_path,
+                    save_as_external_data=True,
+                    all_tensors_to_one_file=True,
+                    convert_attribute=False)
+                output_onnx_path = os.path.join(temp_dir, 'model_with_shape.onnx')
+                onnx.shape_inference.infer_shapes_path(input_onnx_path, output_onnx_path)
+                onnx_graph = onnx.load(output_onnx_path)
         else:
             onnx_graph = shape_inference.infer_shapes(onnx_graph)
 
