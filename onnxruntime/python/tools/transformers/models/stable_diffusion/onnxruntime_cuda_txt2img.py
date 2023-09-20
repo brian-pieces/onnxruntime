@@ -106,6 +106,10 @@ class OnnxruntimeCudaStableDiffusionPipeline(StableDiffusionPipeline):
             embedding_dim=self.embedding_dim,
         )
 
+        # Disable torch SDPA
+        if hasattr(F, "scaled_dot_product_attention"):
+            delattr(F, "scaled_dot_product_attention")
+            
         self.models["unet"] = UNet(
             self.unet,
             device=self.torch_device,
