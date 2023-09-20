@@ -63,7 +63,7 @@ class TFusedMultiHeadAttentionXMMAKernel {
                   &sharedMemPerMultiprocessor, cudaDevAttrMaxSharedMemoryPerBlockOptin, deviceID) != cudaSuccess ||
               sharedMemPerMultiprocessor < static_cast<int32_t>(kernelMeta.mSharedMemBytes)) {
             // skip load function because not enough shared memory to launch the kernel
-            printf("skip loading trt fused attention kernel %s because no enough shared memory",
+            printf("skip loading trt fused attention kernel %s because no enough shared memory\n",
                    kernelMeta.mFuncName);
             continue;
           }
@@ -84,11 +84,12 @@ class TFusedMultiHeadAttentionXMMAKernel {
                                                          CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
                                                          kernelMeta.mSharedMemBytes)) {
             // some chip may not have enough shared memory to launch the kernel
-            printf("skip loading trt fused attention kernel %s because no enough shared memory",
+            printf("skip loading trt fused attention kernel %s because no enough shared memory\n",
                    kernelMeta.mFuncName);
             continue;
           }
         }
+        printf("loaded trt fused attention kernel %s\n", kernelMeta.mFuncName);
         mFunctions.insert({kernelKey, funcInfo});
         const int s = static_cast<int>(kernelMeta.mS);
         if (mValidSequences.find(s) == mValidSequences.end()) {
@@ -104,7 +105,7 @@ class TFusedMultiHeadAttentionXMMAKernel {
     }
 
     loadXMMAKernels(mSM);
-    
+
     // sm_86 chips prefer sm_86 kernel, but can also use sm_80 kernel if sm_86 not exist.
     // sm_89 will reuse sm_80 kernels
     if (mSM == kSM_86 || mSM == kSM_89) {
@@ -165,7 +166,7 @@ class TFusedMHAKernelFactory {
       std::unique_ptr<TFusedMHAKernelList> newKernel(new TFusedMHAKernelList{pKernelList, nbKernels, type, sm});
       newKernel->loadXMMAKernels();
       TFusedMHAKernelList* ret = newKernel.get();
-      mKernels.emplace(id, std::move(newKernel));      
+      mKernels.emplace(id, std::move(newKernel));
       return ret;
     }
     return findIter->second.get();

@@ -58,7 +58,7 @@ class TSharedCubinKernel {
                   &sharedMemPerMultiprocessor, cudaDevAttrMaxSharedMemoryPerBlockOptin, deviceID) != cudaSuccess ||
               sharedMemPerMultiprocessor < kernelMeta.mSharedMemBytes) {
             // skip load function because not enough shared memory to launch the kernel
-            printf("skip loading trt attention kernel %s because no enough shared memory",
+            printf("skip loading trt attention kernel %s because no enough shared memory\n",
                    kernelMeta.mFuncName);
             continue;
           }
@@ -81,11 +81,12 @@ class TSharedCubinKernel {
                                          CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
                                          kernelMeta.mSharedMemBytes) != CUDA_SUCCESS) {
             // some chip may not have enough shared memory to launch the kernel
-            printf("skip loading trt attention kernel %s because no enough shared memory",
+            printf("skip loading trt attention kernel %s because no enough shared memory\n",
                    kernelMeta.mFuncName);
             continue;
           }
         }
+        printf("loaded trt attention kernel %s\n", kernelMeta.mFuncName);
         mFunctions.insert({kernelKey, funcInfo});
       }
     }
