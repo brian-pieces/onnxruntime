@@ -1160,12 +1160,45 @@ class Graph {
   Status InlineFunction(Node& node);
 
   /**
-   Inline a graph into this graph.
-   The Graph needs to be Resolve()d after this call.
-   @param graph to be inlined
-   @param unique_identifier pre-generated unique identifier
+  Directly insert the nodes in the function proto provided into the dest graph.
+  The function converts Constant nodes into the initializers in the destination graph.
+  It then creates a node in the destination graph for each of the function nodes.
+  The function names are expected to be specialized, and, therefore unique.
+
+  The Graph needs to be Resolve()d after this call.
+  @param func_to_inline
+  @param model_path model path of the graph where func_to_inline is from
+  @param dest_graph
+  @returns Status indicating success or providing an error message.
   */
-  Status InlineSubgraph(const Graph& node, std::string_view unique_idenitfier);
+
+  Status FunctionToGraph(const ONNX_NAMESPACE::FunctionProto& func_to_inline, const Path& model_path, Graph& dest_graph);
+
+  /**
+   Inline a graph into this graph. This function copies nodes and initializers of graph_to_inline into
+   this graph. Constant nodes are converted into initializers. Names of all the entities are expected
+   to be updated to be unique as well as the Defs.
+   @param graph_to_inline to be inlined
+   @param model_path model path of the subgraph
+   @param unique_identifier pre-generated unique identifier
+   @param inserted_nodes - indices of this graph nodes that were copied from the graph_to_inline
+  */
+  Status InlineSubgraph(const Graph& graph_to_inline,
+                        const Path& model_path,
+                        InlinedHashMap<int, int>& old_to_new_map,
+                        InlinedVector<NodeIndex>& inserted_nodes);
+
+  /**
+  This function redirects this graph edges that involved inlined_function and redirects them into the nodes
+  of the inlined graph.
+  @param inlined_function function proto of the function that was converted into the inlined subgraph.
+  @param inlined_graph subgraph that was produced from inlined_function and copied to this graph
+  @param model_path
+  @param inserted_nodes - node ids of the nodes that were inserted into this graph
+  @param inlined_node this node will removed from the graph as being replaced by graph nodes
+  */
+  Status FinalizeFunctionGraphInline(gsl::span<const NodeIndex> inserted_nodes,
+                                     const Node& inlined_node);
 
   /** Mark a NodeArg name as coming from the outer scope when programmatically constructing a Graph that will
   be used as a GraphProto attribute in another Node..
@@ -1416,6 +1449,13 @@ class Graph {
   // Add node with specified <node_proto>.
   Node& AddNode(const ONNX_NAMESPACE::NodeProto& node_proto,
                 const ArgNameToTypeMap& name_to_type);
+
+  /** Helper that converts and adds constant node proto to an initializer in the graph.
+      The function requires that all of the nodes names in the constant_node_proto has already been specialized.
+   @param constant_node_proto Constant node to convert
+   @param model_path model path where constant_node_proto is from
+  */
+  Status AddConstantProtoAsInitializer(const ONNX_NAMESPACE::NodeProto& constant_node_proto, const Path& model_path);
 
 #endif
 
