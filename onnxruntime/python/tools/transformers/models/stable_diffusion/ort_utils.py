@@ -7,13 +7,11 @@ import gc
 import logging
 import os
 import shutil
-from collections import OrderedDict
-from typing import Any, Dict
 
 import torch
 
 import onnxruntime as ort
-from onnxruntime.transformers.io_binding_helper import CudaSession, TypeHelper
+from onnxruntime.transformers.io_binding_helper import CudaSession
 
 logger = logging.getLogger(__name__)
 
@@ -90,9 +88,16 @@ class Engines:
                     model = model_obj.get_model().to(model_obj.device)
                     with torch.inference_mode():
                         inputs = model_obj.get_sample_input(1, 512, 512)
+                        fp32_inputs = tuple(
+                            [
+                                (tensor.to(torch.float32) if tensor.dtype == torch.float16 else tensor)
+                                for tensor in inputs
+                            ]
+                        )
+
                         torch.onnx.export(
                             model,
-                            inputs,
+                            fp32_inputs,
                             onnx_path,
                             export_params=True,
                             opset_version=self.onnx_opset,

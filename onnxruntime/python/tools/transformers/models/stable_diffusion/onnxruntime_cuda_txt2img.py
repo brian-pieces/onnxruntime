@@ -36,6 +36,8 @@ import os
 from typing import List, Optional, Union
 
 import torch
+
+# import torch.nn.functional as F
 from diffusers.models import AutoencoderKL, UNet2DConditionModel
 from diffusers.pipelines.stable_diffusion import (
     StableDiffusionPipeline,
@@ -45,7 +47,7 @@ from diffusers.pipelines.stable_diffusion import (
 from diffusers.schedulers import DDIMScheduler
 from diffusers.utils import DIFFUSERS_CACHE
 from huggingface_hub import snapshot_download
-from models import CLIP, VAE, UNet
+from models import CLIP, VAE, PipelineInfo, UNet
 from ort_utils import Engines
 from transformers import CLIPFeatureExtractor, CLIPTextModel, CLIPTokenizer
 
@@ -75,6 +77,7 @@ class OnnxruntimeCudaStableDiffusionPipeline(StableDiffusionPipeline):
         engine_dir: str = "onnxruntime_optimized_onnx",
         force_engine_rebuild: bool = False,
         enable_cuda_graph: bool = False,
+        pipeline_info: PipelineInfo = None,
     ):
         super().__init__(
             vae, text_encoder, tokenizer, unet, scheduler, safety_checker, feature_extractor, requires_safety_checker
@@ -96,31 +99,36 @@ class OnnxruntimeCudaStableDiffusionPipeline(StableDiffusionPipeline):
 
         self.fp16 = False
 
-    def __load_models(self):
-        self.embedding_dim = self.text_encoder.config.hidden_size
+        self.pipeline_info = pipeline_info
 
+    def __load_models(self):
+        assert self.pipeline_info.clip_embedding_dim() == self.text_encoder.config.hidden_size
         self.models["clip"] = CLIP(
+            self.pipeline_info,
             self.text_encoder,
             device=self.torch_device,
             max_batch_size=self.max_batch_size,
-            embedding_dim=self.embedding_dim,
+            clip_skip=0,
         )
 
         # Disable torch SDPA
-        if hasattr(F, "scaled_dot_product_attention"):
-            delattr(F, "scaled_dot_product_attention")
-            
+        # if hasattr(F, "scaled_dot_product_attention"):
+        #     delattr(F, "scaled_dot_product_attention")
+
         self.models["unet"] = UNet(
+            self.pipeline_info,
             self.unet,
             device=self.torch_device,
             fp16=self.fp16,
             max_batch_size=self.max_batch_size,
-            embedding_dim=self.embedding_dim,
             unet_dim=(9 if self.inpaint else 4),
         )
 
         self.models["vae"] = VAE(
-            self.vae, device=self.torch_device, max_batch_size=self.max_batch_size, embedding_dim=self.embedding_dim
+            self.pipeline_info,
+            self.vae,
+            device=self.torch_device,
+            max_batch_size=self.max_batch_size,
         )
 
     @classmethod
@@ -366,20 +374,44 @@ class OnnxruntimeCudaStableDiffusionPipeline(StableDiffusionPipeline):
         return StableDiffusionPipelineOutput(images=images, nsfw_content_detected=has_nsfw_concept)
 
 
-if __name__ == "__main__":
-    model_name_or_path = "runwayml/stable-diffusion-v1-5"
-    scheduler = DDIMScheduler.from_pretrained(model_name_or_path, subfolder="scheduler")
+def test_ort():
+    # model_name_or_path = "runwayml/stable-diffusion-v1-5"
+    # scheduler = DDIMScheduler.from_pretrained(model_name_or_path, subfolder="scheduler", use_safetensors=True)
 
+    # pipe = DiffusionPipeline.from_pretrained("stabilityai/stable-diffusion-xl-base-1.0", torch_dtype=torch.float16, use_safetensors=True, variant="fp16")
+    # pipe.to("cuda")
+
+    pipeline_info = PipelineInfo("1.5")
+    model_name_or_path = pipeline_info.name()
+    scheduler = DDIMScheduler.from_pretrained(model_name_or_path, subfolder="scheduler")
     pipe = OnnxruntimeCudaStableDiffusionPipeline.from_pretrained(
         model_name_or_path,
         scheduler=scheduler,
+        pipeline_info=pipeline_info,
     )
 
     # re-use cached folder to save ONNX models
-    pipe.set_cached_folder(model_name_or_path)
+    pipe.set_cached_folder(model_name_or_path, resume_download=True, local_files_only=True)
 
     pipe = pipe.to("cuda", torch_dtype=torch.float16)
 
     prompt = "photorealistic new zealand hills"
     image = pipe(prompt).images[0]
-    image.save("ort_trt_txt2img_new_zealand_hills.png")
+    image.save("ort_cuda_txt2img_new_zealand_hills.png")
+
+
+def test_torch():
+    model_name_or_path = "runwayml/stable-diffusion-v1-5"
+    pipe = StableDiffusionPipeline.from_pretrained(
+        model_name_or_path,
+    )
+
+    pipe = pipe.to("cuda", torch_dtype=torch.float16)
+
+    prompt = "photorealistic new zealand hills"
+    image = pipe(prompt).images[0]
+    image.save("torch_txt2img_new_zealand_hills.png")
+
+
+if __name__ == "__main__":
+    test_ort()

@@ -211,13 +211,14 @@ class IOBindingHelper:
 class CudaSession:
     """Inference Session with IO Binding for ONNX Runtime CUDA or TensorRT provider"""
 
-    def __init__(self, ort_session: InferenceSession, device: torch.device, enable_cuda_graph=False):
+    def __init__(self, ort_session: InferenceSession, device: torch.device, enable_cuda_graph=False, use_cudart=False):
         self.ort_session = ort_session
         self.input_names = [input.name for input in self.ort_session.get_inputs()]
         self.output_names = [output.name for output in self.ort_session.get_outputs()]
         self.io_name_to_numpy_type = TypeHelper.get_io_numpy_type_map(self.ort_session)
         self.io_binding = self.ort_session.io_binding()
         self.enable_cuda_graph = enable_cuda_graph
+        self.use_cudart = use_cudart
 
         self.input_tensors = OrderedDict()
         self.output_tensors = OrderedDict()
@@ -284,16 +285,19 @@ class CudaSession:
                 if self.enable_cuda_graph:
                     assert self.input_tensors[name].nelement() == tensor.nelement()
                     assert tensor.device.type == "cuda"
-                    # Please install cuda-python package with a version corresponding to CUDA in your machine.
-                    from cuda import cudart
+                    if self.use_cudart:
+                        # Please install cuda-python package with a version corresponding to CUDA in your machine.
+                        from cuda import cudart
 
-                    # Update input tensor inplace since cuda graph requires input and output has fixed memory address.
-                    cudart.cudaMemcpy(
-                        self.input_tensors[name].data_ptr(),
-                        tensor.data_ptr(),
-                        tensor.element_size() * tensor.nelement(),
-                        cudart.cudaMemcpyKind.cudaMemcpyDeviceToDevice,
-                    )
+                        # Update input tensor inplace since cuda graph requires input and output has fixed memory address.
+                        cudart.cudaMemcpy(
+                            self.input_tensors[name].data_ptr(),
+                            tensor.data_ptr(),
+                            tensor.element_size() * tensor.nelement(),
+                            cudart.cudaMemcpyKind.cudaMemcpyDeviceToDevice,
+                        )
+                    else:
+                        self.input_tensors[name].copy_(tensor)
                 else:
                     self.io_binding.bind_input(
                         name,

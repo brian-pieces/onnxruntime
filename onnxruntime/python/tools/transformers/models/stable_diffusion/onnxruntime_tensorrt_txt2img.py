@@ -48,7 +48,7 @@ from diffusers.pipelines.stable_diffusion import (
 from diffusers.schedulers import DDIMScheduler
 from diffusers.utils import DIFFUSERS_CACHE, logging
 from huggingface_hub import snapshot_download
-from models import CLIP, VAE, UNet
+from models import CLIP, VAE, PipelineInfo, UNet
 from transformers import CLIPFeatureExtractor, CLIPTextModel, CLIPTokenizer
 
 import onnxruntime as ort
@@ -290,6 +290,7 @@ class OnnxruntimeTensorRTStableDiffusionPipeline(StableDiffusionPipeline):
         engine_dir: str = "onnxruntime_tensorrt_engine",
         force_engine_rebuild: bool = False,
         enable_cuda_graph: bool = False,
+        pipeline_info: PipelineInfo = None,
     ):
         super().__init__(
             vae, text_encoder, tokenizer, unet, scheduler, safety_checker, feature_extractor, requires_safety_checker
@@ -321,27 +322,33 @@ class OnnxruntimeTensorRTStableDiffusionPipeline(StableDiffusionPipeline):
         self.models = {}  # loaded in __load_models()
         self.engines = {}  # loaded in build_engines()
 
+        self.pipeline_info = pipeline_info
+
     def __load_models(self):
         self.embedding_dim = self.text_encoder.config.hidden_size
 
         self.models["clip"] = CLIP(
+            self.pipeline_info,
             self.text_encoder,
             device=self.torch_device,
             max_batch_size=self.max_batch_size,
-            embedding_dim=self.embedding_dim,
+            clip_skip=0,
         )
 
         self.models["unet"] = UNet(
+            self.pipeline_info,
             self.unet,
             device=self.torch_device,
             fp16=True,
             max_batch_size=self.max_batch_size,
-            embedding_dim=self.embedding_dim,
             unet_dim=(9 if self.inpaint else 4),
         )
 
         self.models["vae"] = VAE(
-            self.vae, device=self.torch_device, max_batch_size=self.max_batch_size, embedding_dim=self.embedding_dim
+            self.pipeline_info,
+            self.vae,
+            device=self.torch_device,
+            max_batch_size=self.max_batch_size,
         )
 
     @classmethod
@@ -577,8 +584,8 @@ class OnnxruntimeTensorRTStableDiffusionPipeline(StableDiffusionPipeline):
 
 
 if __name__ == "__main__":
-    model_name_or_path = "runwayml/stable-diffusion-v1-5"
-
+    pipeline_info = PipelineInfo("1.5")
+    model_name_or_path = pipeline_info.name()
     scheduler = DDIMScheduler.from_pretrained(model_name_or_path, subfolder="scheduler")
 
     pipe = OnnxruntimeTensorRTStableDiffusionPipeline.from_pretrained(
@@ -589,6 +596,7 @@ if __name__ == "__main__":
         image_height=512,
         image_width=512,
         max_batch_size=4,
+        pipeline_info=pipeline_info,
     )
 
     # re-use cached folder to save ONNX models and TensorRT Engines
