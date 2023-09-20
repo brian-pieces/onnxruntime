@@ -622,18 +622,7 @@ TEST_P(ModelTest, Run) {
   }
 
   // TODO(leca): move the parallel run test list to a config file and load it in GetParameterStrings() to make the load process run only once
-  std::set<std::string> tests_run_parallel = {"test_resnet18v2",
-                                              "test_resnet34v2",
-                                              "test_resnet50",
-                                              "test_resnet50v2",
-                                              "test_resnet101v2",
-                                              "test_resnet152v2",
-                                              "keras_lotus_resnet3D",
-                                              "coreml_Resnet50_ImageNet",
-                                              "mlperf_mobilenet",
-                                              "mlperf_resnet",
-                                              "mlperf_ssd_mobilenet_300",
-                                              "mlperf_ssd_resnet34_1200"};
+  std::set<std::string> tests_run_parallel = {};
   bool is_single_node = !model_info->GetNodeName().empty();
   std::vector<ExecutionMode> execution_modes = {ExecutionMode::ORT_SEQUENTIAL};
   if (provider_name == "cpu" && !is_single_node)
