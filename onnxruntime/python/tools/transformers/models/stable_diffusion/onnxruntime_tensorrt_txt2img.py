@@ -48,7 +48,7 @@ from diffusers.pipelines.stable_diffusion import (
 from diffusers.schedulers import DDIMScheduler
 from diffusers.utils import DIFFUSERS_CACHE, logging
 from huggingface_hub import snapshot_download
-from models import CLIP, VAE, PipelineInfo, UNet
+from diffusion_models import CLIP, VAE, PipelineInfo, UNet
 from transformers import CLIPFeatureExtractor, CLIPTextModel, CLIPTokenizer
 
 import onnxruntime as ort
