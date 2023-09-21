@@ -70,6 +70,7 @@ class Engine(CudaSession):
 
         sess_options = ort.SessionOptions()
         sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_DISABLE_ALL
+        print("creating TRT EP session for ", onnx_path)
         ort_session = ort.InferenceSession(
             onnx_path,
             sess_options,
@@ -77,6 +78,7 @@ class Engine(CudaSession):
                 ("TensorrtExecutionProvider", self.ort_trt_provider_options),
             ],
         )
+        print("created TRT EP session for ", onnx_path)
 
         device = torch.device("cuda", device_id)
         super().__init__(ort_session, device, enable_cuda_graph)
@@ -287,7 +289,7 @@ class OnnxruntimeTensorRTStableDiffusionPipeline(StableDiffusionPipeline):
         onnx_opset: int = 17,
         onnx_dir: str = "onnx",
         # TensorRT engine build parameters
-        engine_dir: str = "onnxruntime_tensorrt_engine",
+        engine_dir: str = "ort_trt", # use short name here to avoid exception that path exceeds 260 chars in Windows.
         force_engine_rebuild: bool = False,
         enable_cuda_graph: bool = False,
         pipeline_info: PipelineInfo = None,

@@ -2204,6 +2204,9 @@ common::Status TensorrtExecutionProvider::Compile(const std::vector<FusedNodeAnd
     std::string compute_capability = GetComputeCapacity(prop);
 
     if (!has_dynamic_shape) {
+      // Note: GetCachePath will throw exception when total length > 260.
+      // trt node name is like 'TensorrtExecutionProvider_TRTKernel_graph_main_graph_17136522394210217987_0_0_fp16'
+      // Could we use shorter node name?
       const std::string cache_path = GetCachePath(cache_path_, trt_node_name_with_precision);
       const std::string engine_cache_path = cache_path + "_sm" + compute_capability + ".engine";
       const std::string encrypted_engine_cache_path = engine_cache_path + ".encrypted";
