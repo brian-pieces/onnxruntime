@@ -4019,51 +4019,125 @@ Node& Graph::FuseSubGraph(const IndexedSubGraph& sub_graph,
   return fused_node;
 }
 
-Status Graph::FinalizeFunctionGraphInline(gsl::span<const NodeIndex> inserted_nodes,
-                                          const Node& inlined_node) {
-
-  // pair<NodeIndex, ArgSlot>
-  InlinedHashSet<std::string_view, std::pair<NodeIndex, int>> input_node_arg_node_map;
-  input_node_arg_node_map.reserve(inlined_node.InputDefs().size());
+Status Graph::FinalizeFunctionGraphInline(const Node& inlined_function_node,
+                                          const Graph& inlined_graph,
+                                          const InlinedHashMap<NodeIndex, NodeIndex>& inlined_to_target_map) {
+  // tuple<producer_idx, src_idx, dst_idx>
+  InlinedHashMap<std::string_view, std::tuple<NodeIndex, int, int>> input_node_arg_node_map;
+  input_node_arg_node_map.reserve(inlined_function_node.InputDefs().size());
 
   int arg_slot = 0;
-  for (const auto* input : inlined_node.InputDefs()) {
-    const auto* producer = GetProducerNode(input->Name());
-    input_node_arg_node_map.emplace(input->Name(), std::make_pair(producer->Index(), arg_slot++));
+  for (const auto* input : inlined_function_node.InputDefs()) {
+    const auto& name = input->Name();
+    const auto* producer = GetProducerNode(name);
+    // Need to find the position of this input among the producer's outputs
+    // so we can create and EdgeEnd for the input
+    auto output_defs = producer->OutputDefs();
+    auto hit = std::find_if(output_defs.cbegin(), output_defs.cend(),
+                            [name](const NodeArg* def) {
+                              return def->Name() == name;
+                            });
+    if (hit == output_defs.cend()) {
+      return ORT_MAKE_STATUS(ONNXRUNTIME, INVALID_ARGUMENT, "Cannot find the input among the producer's outputs");
+    }
+    // std::distance will do operator- if the type allows
+    const auto src_idx = static_cast<int>(std::distance(output_defs.cbegin(), hit));
+    input_node_arg_node_map.emplace(name, std::make_tuple(producer->Index(), src_idx, arg_slot++));
   }
 
   arg_slot = 0;
-  InlinedHashMap<std::string_view, InlinedVector<std::pair<NodeIndex, int>>> output_node_arg_node_map;
-  output_node_arg_node_map.reserve(inlined_node.OutputDefs().size());
-  for (const auto* output : inlined_node.OutputDefs()) {
-    auto& consumers = output_node_arg_node_map[output->Name()];
-    for (const auto* consumer : GetConsumerNodes(output->Name())) {
-      consumers.push_back(std::make_pair(consumer->Index(), arg_slot++));
+  // tuple<consumer_idx, src_idx, dst_idx>
+  InlinedHashMap<std::string_view, InlinedVector<std::tuple<NodeIndex, int, int>>> output_node_arg_node_map;
+  output_node_arg_node_map.reserve(inlined_function_node.OutputDefs().size());
+  for (const auto* output : inlined_function_node.OutputDefs()) {
+    const auto& name = output->Name();
+    auto& consumers = output_node_arg_node_map[name];
+    for (const auto* consumer : GetConsumerNodes(name)) {
+      auto input_defs = consumer->InputDefs();
+      auto hit = std::find_if(input_defs.cbegin(), input_defs.cend(),
+                              [name](const NodeArg* def) {
+                                return def->Name() == name;
+                              });
+
+      if (hit == input_defs.cend()) {
+        return ORT_MAKE_STATUS(ONNXRUNTIME, INVALID_ARGUMENT, "Cannot find the output among the consumer's inputs");
+      }
+      const auto dst_idx = static_cast<int>(std::distance(input_defs.cbegin(), hit));
+      consumers.emplace_back(consumer->Index(), arg_slot, dst_idx);
     }
+    ++arg_slot;
   }
 
-  //auto input_edges = inlined_node->GetRelationships().input_edges;  // copy so RemoveEdge doesn't invalidate iterator
-  //for (const auto& input_edge : input_edges) {
-  //  const auto& producer = input_edge.GetNode();
-  //  auto producer_idx = producer.Index();
-  //  auto src_idx = input_edge.GetSrcArgIndex();
-  //  auto dst_idx = input_edge.GetDstArgIndex();
-  //}
-
-  const auto old_node_index = inlined_node.Index();
-  for (auto inlined_node_idx : inserted_nodes) {
-    Node* inlined_node = GetNode(inlined_node_idx);
-    if (nullptr == inlined_node) {
+  const auto inlined_function_node_index = inlined_function_node.Index();
+  for (const auto& [node_to_inline_idx, target_node_index] : inlined_to_target_map) {
+    const Node* node_to_inline = inlined_graph.GetNode(node_to_inline_idx);
+    if (nullptr == node_to_inline) {
       continue;
     }
 
-    // Check for inputs first
+    // Process all input edges and switch the inlined nodes to target_node_idx
+    // the target node. What to do for implicit inputs? We assume that functions
+    // do not have implicit inputs.
+    {
+      const auto& input_edges = node_to_inline->GetRelationships().input_edges;
+      for (const auto& input_edge : input_edges) {
+        const auto& producer = input_edge.GetNode();
+        const auto producer_idx = producer.Index();
+        const auto src_idx = input_edge.GetSrcArgIndex();
+        const auto dst_idx = input_edge.GetDstArgIndex();
 
-    // Remove old Edge
-    //RemoveEdge(producer_idx, old_node_index, src_idx, dst_idx);
+        // Find the new producer
+        const auto hit = inlined_to_target_map.find(producer_idx);
+        ORT_ENFORCE(hit != inlined_to_target_map.cend(),
+                    "The inlined producer_idx: ", producer_idx, " node is expected to be present in mapping");
+        const auto new_producer_idx = hit->second;
+        AddEdge(new_producer_idx, target_node_index, src_idx, dst_idx);
+      }
+    }
+
+    // Process input defs to see if anything comes as inputs to the graph
+    for (const auto* input_def : node_to_inline->InputDefs()) {
+      auto hit = input_node_arg_node_map.find(input_def->Name());
+      if (hit != input_node_arg_node_map.cend()) {
+        const auto& [producer_idx, src_idx, dst_idx] = hit->second;
+        AddEdge(producer_idx, target_node_index, src_idx, dst_idx);
+        RemoveEdge(producer_idx, inlined_function_node_index, src_idx, dst_idx);
+      }
+    }
+
+    // Process all the output edges of the node
+    {
+      const auto& output_edges = node_to_inline->GetRelationships().output_edges;
+      for (const auto& output_edge : output_edges) {
+        const auto& consumer = output_edge.GetNode();
+        const auto consumer_idx = consumer.Index();
+        const auto src_idx = output_edge.GetSrcArgIndex();
+        const auto dst_idx = output_edge.GetDstArgIndex();
+
+        // Find new consumer
+        const auto hit = inlined_to_target_map.find(consumer_idx);
+        ORT_ENFORCE(hit != inlined_to_target_map.cend(),
+                    "The inlined consumer_idx: ", consumer_idx, " node is expected to be present in mapping");
+        const auto new_consumer_idx = hit->second;
+        AddEdge(target_node_index, new_consumer_idx, src_idx, dst_idx);
+      }
+    }
+
+    // process output defs to see if we have an output to another node
+    for (const auto* output_def : node_to_inline->OutputDefs()) {
+      auto hit = output_node_arg_node_map.find(output_def->Name());
+      if (hit != output_node_arg_node_map.cend()) {
+        const auto& consumers = hit->second;
+        for (const auto& [consumer_idx, src_idx, dst_idx] : consumers) {
+          AddEdge(target_node_index, consumer_idx, src_idx, dst_idx);
+          RemoveEdge(inlined_function_node_index, consumer_idx, src_idx, dst_idx);
+        }
+      }
+    }
   }
 
-  RemoveNode(inlined_node.Index());
+  ORT_ENFORCE(inlined_function_node.GetOutputEdgesCount() == 0, "Must all of the output edges removed");
+  RemoveNode(inlined_function_node.Index());
 
   return Status::OK();
 }
@@ -4090,9 +4164,8 @@ Status Graph::AddConstantProtoAsInitializer(const ONNX_NAMESPACE::NodeProto& nod
 }
 
 Status Graph::InlineSubgraph(const Graph& graph_to_inline, const Path& model_path,
-                             InlinedHashMap<int, int>& old_to_new_map,
-                             InlinedVector<NodeIndex>& inserted_nodes) {
-
+                             InlinedHashMap<NodeIndex, NodeIndex>& old_to_new_map) {
+  old_to_new_map.reserve(graph_to_inline.nodes_.size());
   for (const auto& subgraph_node : graph_to_inline.Nodes()) {
     if (subgraph_node.OpType() != kConstant) {
       auto& new_node = AddNode(subgraph_node.Name(), subgraph_node.OpType(), subgraph_node.Description(),
@@ -4107,7 +4180,6 @@ Status Graph::InlineSubgraph(const Graph& graph_to_inline, const Path& model_pat
       }
 
       old_to_new_map.insert_or_assign(subgraph_node.Index(), new_node.Index());
-      inserted_nodes.push_back(new_node.Index());
     }
   }
 
@@ -4157,7 +4229,7 @@ Status Graph::FunctionToGraph(const ONNX_NAMESPACE::FunctionProto& func_to_inlin
   for (const auto& inlined_node : func_to_inline.node()) {
     if (inlined_node.op_type() == kConstant) {
       // Copy constant nodes _value to name_to_initial_tensor_
-      ORT_RETURN_IF_ERROR(AddConstantProtoAsInitializer(inlined_node, model_path));
+      ORT_RETURN_IF_ERROR(dest_graph.AddConstantProtoAsInitializer(inlined_node, model_path));
     }
   }
 
@@ -4177,8 +4249,8 @@ Status Graph::FunctionToGraph(const ONNX_NAMESPACE::FunctionProto& func_to_inlin
       for (const auto& node_attr : inlined_node.attribute()) {
         new_attr_map.insert_or_assign(node_attr.name(), node_attr);
       }
-      AddNode(inlined_node.name(), inlined_node.op_type(),
-              inlined_node.doc_string(), inputs, outputs, &new_attr_map, inlined_node.domain());
+      dest_graph.AddNode(inlined_node.name(), inlined_node.op_type(),
+                         inlined_node.doc_string(), inputs, outputs, &new_attr_map, inlined_node.domain());
     }
   }
   return Status::OK();
@@ -4222,11 +4294,11 @@ Status Graph::InlineFunction(Node& callnode) {
         std::string uniq_name(subgraph_node.Name());
         uniq_name.append(uniq_identifier);
 
-        auto& new_node = AddNode(uniq_name, subgraph_node.OpType(), subgraph_node.Description(),
-                                 subgraph_node.InputDefsAsSpan(),
-                                 subgraph_node.OutputDefsAsSpan(),
-                                 &subgraph_node.GetAttributes(),
-                                 subgraph_node.Domain());
+        AddNode(uniq_name, subgraph_node.OpType(), subgraph_node.Description(),
+                subgraph_node.InputDefsAsSpan(),
+                subgraph_node.OutputDefsAsSpan(),
+                &subgraph_node.GetAttributes(),
+                subgraph_node.Domain());
       }
     }
 

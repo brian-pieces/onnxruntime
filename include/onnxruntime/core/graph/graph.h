@@ -1168,7 +1168,7 @@ class Graph {
   The Graph needs to be Resolve()d after this call.
   @param func_to_inline
   @param model_path model path of the graph where func_to_inline is from
-  @param dest_graph
+  @param dest_graph graph where we want node copies to appear
   @returns Status indicating success or providing an error message.
   */
 
@@ -1180,25 +1180,25 @@ class Graph {
    to be updated to be unique as well as the Defs.
    @param graph_to_inline to be inlined
    @param model_path model path of the subgraph
-   @param unique_identifier pre-generated unique identifier
-   @param inserted_nodes - indices of this graph nodes that were copied from the graph_to_inline
+   @param inlined_to_target_map - map of indices of the graph_to_inline to indices of nodes
+    copied into this graph.
   */
   Status InlineSubgraph(const Graph& graph_to_inline,
                         const Path& model_path,
-                        InlinedHashMap<int, int>& old_to_new_map,
-                        InlinedVector<NodeIndex>& inserted_nodes);
+                        InlinedHashMap<NodeIndex, NodeIndex>& inlined_to_target_map);
 
   /**
   This function redirects this graph edges that involved inlined_function and redirects them into the nodes
   of the inlined graph.
-  @param inlined_function function proto of the function that was converted into the inlined subgraph.
-  @param inlined_graph subgraph that was produced from inlined_function and copied to this graph
-  @param model_path
-  @param inserted_nodes - node ids of the nodes that were inserted into this graph
-  @param inlined_node this node will removed from the graph as being replaced by graph nodes
+  @param inlined_node function that was converted to a graph
+  @param inlined_graph the graph instance that was construted from the inlined_node function. It is
+    expected to be independently Resolve()d before this function is called.
+  @param old_to_new_map map between indices of the graph that was constructed from the function to be
+  inlined to this graph node indices.
   */
-  Status FinalizeFunctionGraphInline(gsl::span<const NodeIndex> inserted_nodes,
-                                     const Node& inlined_node);
+  Status FinalizeFunctionGraphInline(const Node& inlined_node,
+                                     const Graph& inlined_graph,
+                                     const InlinedHashMap<NodeIndex, NodeIndex>& old_to_new_map);
 
   /** Mark a NodeArg name as coming from the outer scope when programmatically constructing a Graph that will
   be used as a GraphProto attribute in another Node..
