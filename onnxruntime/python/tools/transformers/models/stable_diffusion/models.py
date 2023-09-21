@@ -128,6 +128,10 @@ class PipelineInfo:
     def use_safetensors(self) -> bool:
         return self.is_sd_xl()
 
+    @staticmethod
+    def supported_versions():
+        return ["1.4", "1.5", "2.0-base", "2.0", "2.1", "2.1-base", "xl-1.0"]
+
     def name(self) -> str:
         if self.version == "1.4":
             if self.is_inpaint():
@@ -404,7 +408,7 @@ class CLIP(BaseModel):
 
     def get_sample_input(self, batch_size, image_height, image_width):
         self.check_dims(batch_size, image_height, image_width)
-        return torch.zeros(batch_size, self.text_maxlen, dtype=torch.int32, device=self.device)
+        return (torch.zeros(batch_size, self.text_maxlen, dtype=torch.int32, device=self.device),)
 
     def optimize_trt(self, input_onnx_path, optimized_onnx_path):
         onnx_graph = onnx.load(input_onnx_path)

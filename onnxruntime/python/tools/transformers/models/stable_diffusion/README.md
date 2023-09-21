@@ -78,11 +78,11 @@ It is recommended to create a Conda environment with Python 3.8, 3.9 or 3.10, an
 ```
 conda create -n py38 python=3.8
 conda activate py38
-pip install torch==1.13.1+cu117 --extra-index-url https://download.pytorch.org/whl/cu117
+pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu118
+pip install --upgrade polygraphy onnx-graphsurgeon --extra-index-url https://pypi.ngc.nvidia.com
 pip install -r requirements-cuda.txt
 ```
-
-ONNX Runtime requires CUDA and [cuDNN](https://developer.nvidia.com/rdp/cudnn-download) for GPU inference. CUDA 11.7 and cuDNN 8.5 are used in our tests.
+ONNX Runtime requires CUDA and [cuDNN](https://developer.nvidia.com/rdp/cudnn-download) for GPU inference. CUDA 11.8 and cuDNN 8.5 or above are recommended.
 
 #### Install Nightly (Optional)
 
@@ -239,7 +239,7 @@ For TensorRT installation, follow https://docs.nvidia.com/deeplearning/tensorrt/
 
 ```
 pip install torch==1.13.1+cu117 --extra-index-url https://download.pytorch.org/whl/cu117
-pip install --upgrade polygraphy>=0.47.0 onnx-graphsurgeon --extra-index-url https://pypi.ngc.nvidia.com
+pip install --upgrade polygraphy onnx-graphsurgeon --extra-index-url https://pypi.ngc.nvidia.com
 pip install -r requirements-tensorrt.txt
 export CUDA_MODULE_LOADING=LAZY
 python benchmark.py -e tensorrt -b 1 -v 1.5

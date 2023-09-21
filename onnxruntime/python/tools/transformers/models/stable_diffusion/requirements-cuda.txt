@@ -7,6 +7,8 @@ cuda-python==11.8.0
 # For windows, cuda-python need the following
 pywin32; platform_system == "Windows"
 
-#To export onnx of stable diffusion, please install PyTorch 1.13.1+cu117
-#or 2.10 like pip3 install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu118
-#pip install --upgrade polygraphy>=0.47.0 onnx-graphsurgeon --extra-index-url https://pypi.ngc.nvidia.com
+nvtx
+
+# To export onnx, please install PyTorch 2.10 like
+# pip3 install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu118
+# pip3 install --upgrade polygraphy onnx-graphsurgeon --extra-index-url https://pypi.ngc.nvidia.com

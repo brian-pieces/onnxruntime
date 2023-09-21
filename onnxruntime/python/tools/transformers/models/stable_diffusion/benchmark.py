@@ -427,7 +427,7 @@ def run_ort(
 
 
 def export_and_run_ort(
-    model_name: str,
+    version: str,
     provider: str,
     batch_size: int,
     disable_safety_checker: bool,
@@ -443,15 +443,19 @@ def export_and_run_ort(
     assert provider == "CUDAExecutionProvider"
 
     from diffusers import DDIMScheduler
+    from models import PipelineInfo
     from onnxruntime_cuda_txt2img import OnnxruntimeCudaStableDiffusionPipeline
 
-    scheduler = DDIMScheduler.from_pretrained(model_name, subfolder="scheduler")
+    pipeline_info = PipelineInfo(version)
+    model_name = pipeline_info.name()
 
+    scheduler = DDIMScheduler.from_pretrained(model_name, subfolder="scheduler")
     pipe = OnnxruntimeCudaStableDiffusionPipeline.from_pretrained(
         model_name,
         scheduler=scheduler,
         requires_safety_checker=not disable_safety_checker,
         enable_cuda_graph=enable_cuda_graph,
+        pipeline_info=pipeline_info,
     )
 
     # re-use cached folder to save ONNX models
@@ -514,7 +518,7 @@ def export_and_run_ort(
 
 
 def run_ort_trt(
-    model_name: str,
+    version: str,
     batch_size: int,
     disable_safety_checker: bool,
     height: int,
@@ -528,7 +532,11 @@ def run_ort_trt(
     enable_cuda_graph: bool,
 ):
     from diffusers import DDIMScheduler
+    from models import PipelineInfo
     from onnxruntime_tensorrt_txt2img import OnnxruntimeTensorRTStableDiffusionPipeline
+
+    pipeline_info = PipelineInfo(version)
+    model_name = pipeline_info.name()
 
     assert batch_size <= max_batch_size
 
@@ -544,6 +552,7 @@ def run_ort_trt(
         max_batch_size=max_batch_size,
         onnx_opset=17,
         enable_cuda_graph=enable_cuda_graph,
+        pipeline_info=pipeline_info,
     )
 
     # re-use cached folder to save ONNX models and TensorRT Engines
@@ -952,7 +961,7 @@ def main():
     provider = PROVIDERS[args.provider]
     if args.engine == "onnxruntime" and args.provider == "tensorrt":
         result = run_ort_trt(
-            sd_model,
+            args.version,
             args.batch_size,
             not args.enable_safety_checker,
             args.height,
@@ -968,7 +977,7 @@ def main():
     elif args.engine == "onnxruntime" and provider == "CUDAExecutionProvider" and args.pipeline is None:
         print("Pipeline is not specified. Trying export and optimize onnx models...")
         result = export_and_run_ort(
-            sd_model,
+            args.version,
             provider,
             args.batch_size,
             not args.enable_safety_checker,
